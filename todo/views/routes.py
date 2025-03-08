@@ -1,4 +1,7 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
+from todo.models import db
+from todo.models.todo import Todo
+from datetime import datetime, timedelta
  
 api = Blueprint('api', __name__, url_prefix='/api/v1') 
 
@@ -21,25 +24,104 @@ def health():
 @api.route('/todos', methods=['GET'])
 def get_todos():
     """Return the list of todo items"""
-    return jsonify([TEST_ITEM])
+    window = request.args.get('window')
+    if window is not None:
+        try:
+            window = int(window)
+        except ValueError:
+            return jsonify({"error": "Invalid window parameter"}), 400
+        returnCompleted = request.args.get('completed')
+        if returnCompleted is not None:
+            returnCompleted = returnCompleted.lower() == 'true'
+            todos = Todo.query.filter_by(completed=returnCompleted).filter(Todo.deadline_at <= datetime.now() + timedelta(days=window)).all()
+            result = []
+            for todo in todos:
+                result.append(todo.to_dict())
+            return jsonify(result)
+      
+        todos = Todo.query.filter(Todo.deadline_at <= datetime.now() + timedelta(days=window)).all()
+        result = []
+        for todo in todos:
+            result.append(todo.to_dict())
+        return jsonify(result)
+    else:
+        returnCompleted = request.args.get('completed')
+        if returnCompleted is not None:
+            returnCompleted = returnCompleted.lower() == 'true'
+            todos = Todo.query.filter_by(completed=returnCompleted).all()
+            result = []
+            for todo in todos:
+                result.append(todo.to_dict())
+            return jsonify(result)
+        
+        todos = Todo.query.all()
+        result = []
+        for todo in todos:
+            result.append(todo.to_dict())
+        return jsonify(result)
 
 @api.route('/todos/<int:todo_id>', methods=['GET'])
 def get_todo(todo_id):
     """Return the details of a todo item"""
-    return jsonify(TEST_ITEM)
+    todo = Todo.query.get(todo_id)
+    if todo is None:
+        return jsonify({"error": "Not Found"}), 404
+    return jsonify(todo.to_dict())
 
 @api.route('/todos', methods=['POST'])
 def create_todo():
     """Create a new todo item and return the created item"""
-    return jsonify(TEST_ITEM), 201
+    if not request.json:
+        return jsonify({"error": "Invalid request"}), 400
+    
+    for req in request.json:
+        if req not in ["title", "description", "completed", "deadline_at"]:
+            return jsonify({"error": "Invalid request"}), 400
+
+    if 'title' not in request.json:
+        return jsonify({"error": "Invalid request"}), 400
+
+    todo = Todo(
+        title=request.json.get('title'),
+        description=request.json.get('description'),
+        completed=request.json.get('completed', False),
+    )
+    if 'deadline_at' in request.json:
+        todo.deadline_at = datetime.fromisoformat(request.json.get('deadline_at'))
+    db.session.add(todo)
+    db.session.commit()
+    return jsonify(todo.to_dict()), 201
 
 @api.route('/todos/<int:todo_id>', methods=['PUT'])
 def update_todo(todo_id):
     """Update a todo item and return the updated item"""
-    return jsonify(TEST_ITEM)
+    if not request.json:
+        return jsonify({"error": "Invalid request"}), 400
+    
+    for req in request.json:
+        if req not in ["title", "description", "completed", "deadline_at"]:
+            return jsonify({"error": "Invalid request"}), 400
+
+    todo = Todo.query.get(todo_id) 
+    if todo is None: 
+        return jsonify({'error': 'Todo not found'}), 404 
+  
+    todo.title = request.json.get('title', todo.title) 
+    todo.description = request.json.get('description', todo.description) 
+    todo.completed = request.json.get('completed', todo.completed) 
+    todo.deadline_at = request.json.get('deadline_at', todo.deadline_at) 
+    db.session.commit() 
+  
+    return jsonify(todo.to_dict())
 
 @api.route('/todos/<int:todo_id>', methods=['DELETE'])
 def delete_todo(todo_id):
     """Delete a todo item and return the deleted item"""
-    return jsonify(TEST_ITEM)
+    todo = Todo.query.get(todo_id) 
+    if todo is None: 
+        return jsonify({}), 200 
+  
+    db.session.delete(todo) 
+    db.session.commit() 
+    return jsonify(todo.to_dict()), 200
  
